@@ -412,7 +412,7 @@ class StreamRoles(commands.Cog):
                     await member.add_roles(role)
                     if channel:
                         ping_role = await self.get_ping_role(member.guild)
-                        await self._post_alert(ping_role, member, channel)
+                        await self._post_alert(member, channel, ping_role)
                 return
 
         if has_role:
@@ -457,7 +457,7 @@ class StreamRoles(commands.Cog):
             await self._update_member(member, streamer_role, alerts_channel)
 
     async def _post_alert(
-        self, ping_role: discord.Role=None, member: discord.Member, channel: discord.TextChannel
+        self, member: discord.Member, channel: discord.TextChannel, ping_role: discord.Role=None
     ) -> discord.Message:
         activity = member.activity
         if ping_role is None:
