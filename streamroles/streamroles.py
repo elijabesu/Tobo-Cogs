@@ -53,6 +53,7 @@ class StreamRoles(commands.Cog):
             mode="blacklist",
             alerts__enabled=False,
             alerts__channel=None,
+            ping_role=None,
         )
         self.conf.register_member(
             blacklisted=False, whitelisted=False, alert_messages={}
@@ -278,6 +279,14 @@ class StreamRoles(commands.Cog):
         await self.conf.guild(ctx.guild).alerts.channel.set(channel.id)
         await ctx.tick()
 
+    @alerts.command(name="ping")
+    async def alerts_ping(self, ctx: commands.Context, *, role: discord.Role):
+        """Set the role which is pinged during streamrole alerts."""
+        await self.conf.guild(ctx.guild).ping_role.set(role.id)
+        await ctx.send(
+            "Done. {} will now be pinged when stream goes live.".format(role.name)
+        )
+
     async def _get_filter_list(
         self, guild: discord.Guild, mode: str
     ) -> Tuple[List[discord.Member], List[discord.Role]]:
@@ -314,6 +323,30 @@ class StreamRoles(commands.Cog):
             if not set.
         """
         role_id = await self.conf.guild(guild).streamer_role()
+        if not role_id:
+            return
+        try:
+            role = next(r for r in guild.roles if r.id == role_id)
+        except StopIteration:
+            return
+        else:
+            return role
+
+    async def get_ping_role(self, guild: discord.Guild) -> Optional[discord.Role]:
+        """Get the streamrole for this guild.
+
+        Arguments
+        ---------
+        guild : discord.Guild
+            The guild to retrieve the ping role for.
+
+        Returns
+        -------
+        Optional[discord.Role]
+            The role given to streaming users in this guild. ``None``
+            if not set.
+        """
+        role_id = await self.conf.guild(guild).ping_role()
         if not role_id:
             return
         try:
@@ -378,7 +411,8 @@ class StreamRoles(commands.Cog):
                     log.debug("Adding streamrole %s to member %s", role.id, member.id)
                     await member.add_roles(role)
                     if channel:
-                        await self._post_alert(member, channel)
+                        ping_role = await self.get_ping_role(member.guild)
+                        await self._post_alert(ping_role, member, channel)
                 return
 
         if has_role:
@@ -423,15 +457,35 @@ class StreamRoles(commands.Cog):
             await self._update_member(member, streamer_role, alerts_channel)
 
     async def _post_alert(
-        self, member: discord.Member, channel: discord.TextChannel
+        self, ping_role: discord.Role=None, member: discord.Member, channel: discord.TextChannel
     ) -> discord.Message:
         activity = member.activity
-        content = (
-            f"{chatutils.bold(member.display_name)} is now live on Twitch, playing "
-            f"{chatutils.italics(str(activity.details))}:\n\n"
-            f"{chatutils.italics(activity.name)}\n\n{activity.url}"
-        )
-        msg = await channel.send(content)
+        if ping_role is None:
+            content = (
+                f"{chatutils.bold(member.display_name)} is now live on Twitch, playing "
+                f"{chatutils.italics(str(activity.details))}:\n\n"
+                f"{chatutils.italics(activity.name)}\n\n{activity.url}"
+            )
+            msg = await channel.send(content)
+        else:
+            if not ping_role.mentionable:
+                await role.edit(mentionable=True)
+                content = (
+                    f"{ping_role.mention}"
+                    f"{chatutils.bold(member.display_name)} is now live on Twitch, playing "
+                    f"{chatutils.italics(str(activity.details))}:\n\n"
+                    f"{chatutils.italics(activity.name)}\n\n{activity.url}"
+                )
+                msg = await channel.send(content)
+                await role.edit(mentionable=False)
+            else:
+                content = (
+                    f"{ping_role.mention}"
+                    f"{chatutils.bold(member.display_name)} is now live on Twitch, playing "
+                    f"{chatutils.italics(str(activity.details))}:\n\n"
+                    f"{chatutils.italics(activity.name)}\n\n{activity.url}"
+                )
+                msg = await channel.send(content)
         await self.conf.member(member).alert_messages.set_raw(
             str(channel.id), value=msg.id
         )
@@ -445,18 +499,6 @@ class StreamRoles(commands.Cog):
         if msg_id is None:
             return
         await conf_group.clear_raw(str(channel.id))
-
-        msg: Optional[discord.Message] = discord.utils.get(
-            getattr(self.bot, "cached_messages", ()), id=msg_id
-        )
-        if msg is None:
-            try:
-                msg = await channel.fetch_message(msg_id)
-            except discord.NotFound:
-                return
-
-        with contextlib.suppress(discord.NotFound):
-            await msg.delete()
 
     @commands.Cog.listener()
     async def on_guild_join(self, guild: discord.Guild) -> None:
